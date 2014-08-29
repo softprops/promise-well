@@ -2,7 +2,7 @@ package promisewell
 
 import scala.concurrent.{ Future, ExecutionContext, Promise }
 import scala.concurrent.duration.FiniteDuration
-import java.util.{ Collections, LinkedHashMap }
+import java.util.{ Collections, LinkedHashMap, Map => JMap }
 
 trait Cache[K, V] {
   def get(k: K): Option[Future[V]]
@@ -29,7 +29,7 @@ case class Capped[K, V](
     Collections.synchronizedMap(
       new LinkedHashMap[K, Future[V]](initCapacity) {
         override protected def removeEldestEntry(
-          e: java.util.Map.Entry[K, Future[V]]): Boolean =
+          e: JMap.Entry[K, Future[V]]): Boolean =
             size() > capacity
       })
 
@@ -74,7 +74,7 @@ case class Lru[K, V](
     Collections.synchronizedMap(
       new LinkedHashMap[K, Entry[V]](initCapacity) {
         override protected def removeEldestEntry(
-          e: java.util.Map.Entry[K, Entry[V]]): Boolean =
+          e: JMap.Entry[K, Entry[V]]): Boolean =
             size() > capacity
       })
 
