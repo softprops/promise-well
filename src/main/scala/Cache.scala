@@ -13,11 +13,17 @@ trait Cache[K, V] {
 }
 
 object Cache {
-  def capped[K,V](cap: Long, initCap: Int): Cache[K, V] =
+  def capped[K,V](
+    cap: Long,
+    initCap: Int): Cache[K, V] =
     Capped(cap, initCap)
+
   def lru[K,V](
-    cap: Long, initCap: Int, ttl: FiniteDuration, ttidle: FiniteDuration): Cache[K, V] =
-    Lru(cap, initCap, ttl, ttidle)
+    cap: Long,
+    initCap: Int,
+    ttl: FiniteDuration,
+    ttidle: FiniteDuration): Cache[K, V] =
+      Lru(cap, initCap, ttl, ttidle)
 }
 
 case class Capped[K, V](
