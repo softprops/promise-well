@@ -7,14 +7,48 @@ import java.util.{ Collections, LinkedHashMap }
 trait Cache[K, V] {
   def get(k: K): Option[Future[V]]
   def apply(k: K, make: () => Future[V])
-    (implicit ec: ExecutionContext)
+    (implicit ec: ExecutionContext): Future[V]
   def remove(k: K): Option[Future[V]]
   def clear(): Unit
 }
 
-case class LruCache[K, V](
+object Cache {
+  def capped[K,V](cap: Long, initCap: Int): Cache[K, V] =
+    Capped(cap, initCap)
+  def lru[K,V](
+    cap: Long, initCap: Int, ttl: FiniteDuration, ttidle: FiniteDuration): Cache[K, V] =
+    Lru(cap, initCap, ttl, ttidle)
+}
+
+case class Capped[K, V](capacity: Long, initCapacity: Int) extends Cache[K, V] {
+  private[this] val underlying =
+    Collections.synchronizedMap(
+      new LinkedHashMap[K, Future[V]](initCapacity))
+
+  def get(k: K): Option[Future[V]] = Option(underlying.get(k))
+
+  def apply(k: K, make: () => Future[V])(implicit ec: ExecutionContext): Future[V] = {
+    val promise = Promise[V]()
+    underlying.put(k, promise.future) match {
+      case null =>
+        val future = make()
+        future.onComplete { value =>
+          promise.complete(value)
+          if (value.isFailure) underlying.remove(k)
+        }
+        future
+      case existingFuture => existingFuture
+    }
+  }
+
+  def remove(k: K) = Option(underlying.remove(k))
+
+  def clear() = underlying.clear()
+}
+
+case class Lru[K, V](
   capcity: Long, initCapacity: Int,
-  ttlive: FiniteDuration, ttidle: FiniteDuration) {
+  ttlive: FiniteDuration, ttidle: FiniteDuration) extends Cache[K, V]{
   private[this] case class Entry[V](promise: Promise[V]) {
     val created = System.currentTimeMillis
     @volatile var touched = created
