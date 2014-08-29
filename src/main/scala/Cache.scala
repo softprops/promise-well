@@ -56,9 +56,9 @@ case class Capped[K, V](
     }
   }
 
-  def remove(k: K) = Option(underlying.remove(k))
+  def remove(k: K): Option[Future[V]] = Option(underlying.remove(k))
 
-  def clear() = underlying.clear()
+  def clear(): Unit = underlying.clear()
 }
 
 case class Lru[K, V](
