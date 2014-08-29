@@ -26,7 +26,7 @@ val cityOpt: Option[Future[City]] = well.get(latlon)
 val city: Future[City] = well(latlon, () => lookup(latlon))
 
 // delete a city from the cache
-val prevOpt: Option[City] = well.delete(latlon)
+val prevOpt: Option[Future[City]] = well.delete(latlon)
 
 // remove all items in the cache
 well.clear()
