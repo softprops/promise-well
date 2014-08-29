@@ -27,7 +27,11 @@ case class Capped[K, V](
 
   private[this] val underlying =
     Collections.synchronizedMap(
-      new LinkedHashMap[K, Future[V]](initCapacity))
+      new LinkedHashMap[K, Future[V]](initCapacity) {
+        override protected def removeEldestEntry(
+          e: java.util.Map.Entry[K, Future[V]]): Boolean =
+            size() > capacity
+      })
 
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
@@ -52,7 +56,7 @@ case class Capped[K, V](
 }
 
 case class Lru[K, V](
-  capcity: Long,
+  capacity: Long,
   initCapacity: Int,
   ttlive: FiniteDuration,
   ttidle: FiniteDuration
@@ -68,7 +72,11 @@ case class Lru[K, V](
 
   private[this] val underlying =
     Collections.synchronizedMap(
-      new LinkedHashMap[K, Entry[V]](initCapacity))
+      new LinkedHashMap[K, Entry[V]](initCapacity) {
+        override protected def removeEldestEntry(
+          e: java.util.Map.Entry[K, Entry[V]]): Boolean =
+            size() > capacity
+      })
 
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {
