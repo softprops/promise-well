@@ -5,10 +5,18 @@ import scala.concurrent.{ Future, ExecutionContext, Promise }
 import scala.concurrent.duration.FiniteDuration
 
 trait Cache[K, V] {
+  /** attempt to resolve element `k` from the cache */
   def get(k: K): Option[Future[V]]
+
+  /** attempt to resolve element `k` from the cache, falling back on making
+   *  a new future, caching it's result in the process */
   def apply(k: K, make: () => Future[V])
     (implicit ec: ExecutionContext): Future[V]
+
+  /** remove element `k` from the cache */
   def remove(k: K): Option[Future[V]]
+
+  /** clear the contents of the cache */
   def clear(): Unit
 }
 
@@ -39,7 +47,8 @@ case class Capped[K, V](
 
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
-  def apply(k: K, make: () => Future[V])
+  def apply
+   (k: K, make: () => Future[V])
    (implicit ec: ExecutionContext): Future[V] = {
     val promise = Promise[V]()
     underlying.putIfAbsent(k, promise.future) match {
@@ -92,7 +101,8 @@ case class Lru[K, V](
         else get(k)
     }
 
-  def apply(k: K, make: () => Future[V])
+  def apply
+   (k: K, make: () => Future[V])
    (implicit ec: ExecutionContext): Future[V] = {
     def put() = {
       val newEntry = Entry(Promise[V]())
