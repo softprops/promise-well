@@ -1,8 +1,8 @@
 package promisewell
 
+import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
 import scala.concurrent.{ Future, ExecutionContext, Promise }
 import scala.concurrent.duration.FiniteDuration
-import java.util.{ Collections, LinkedHashMap, Map => JMap }
 
 trait Cache[K, V] {
   def get(k: K): Option[Future[V]]
@@ -32,19 +32,17 @@ case class Capped[K, V](
 ) extends Cache[K, V] {
 
   private[this] val underlying =
-    Collections.synchronizedMap(
-      new LinkedHashMap[K, Future[V]](initCapacity) {
-        override protected def removeEldestEntry(
-          e: JMap.Entry[K, Future[V]]): Boolean =
-            size() > capacity
-      })
+    new ConcurrentLinkedHashMap.Builder[K, Future[V]]
+      .initialCapacity(initCapacity)
+      .maximumWeightedCapacity(capacity)
+      .build
 
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
   def apply(k: K, make: () => Future[V])
    (implicit ec: ExecutionContext): Future[V] = {
     val promise = Promise[V]()
-    underlying.put(k, promise.future) match {
+    underlying.putIfAbsent(k, promise.future) match {
       case null =>
         val future = make()
         future.onComplete { value =>
@@ -52,7 +50,7 @@ case class Capped[K, V](
           if (value.isFailure) underlying.remove(k)
         }
         future
-      case existingFuture => existingFuture
+      case made => made
     }
   }
 
@@ -77,12 +75,10 @@ case class Lru[K, V](
   }
 
   private[this] val underlying =
-    Collections.synchronizedMap(
-      new LinkedHashMap[K, Entry[V]](initCapacity) {
-        override protected def removeEldestEntry(
-          e: JMap.Entry[K, Entry[V]]): Boolean =
-            size() > capacity
-      })
+    new ConcurrentLinkedHashMap.Builder[K, Entry[V]]
+      .initialCapacity(initCapacity)
+      .maximumWeightedCapacity(capacity)
+      .build
 
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {
@@ -92,10 +88,8 @@ case class Lru[K, V](
         Some(entry.future)
       case entry =>
         // expire
-        underlying.remove(k, entry) match {
-          case null => None
-          case _ => get(k)
-        }
+        if (underlying.remove(k, entry)) None
+        else get(k)
     }
 
   def apply(k: K, make: () => Future[V])
