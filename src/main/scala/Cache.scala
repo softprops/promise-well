@@ -80,7 +80,10 @@ case class Lru[K, V](
     @volatile var touched = created
     def future = promise.future
     def touch() = touched = System.currentTimeMillis
-    def live = true // todo base on config above
+    def live = {
+      val now = System.currentTimeMillis
+      (created +  ttlive.toMillis) > now && (touched + ttidle.toMillis) > now
+    }
   }
 
   private[this] val underlying =
