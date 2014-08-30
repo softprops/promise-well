@@ -1,6 +1,6 @@
 # promise well
 
-> kind of like a wishing well but for kepted promises
+> kind of like a wishing well but for kepted promises. drop your promises off can come back later to find their keepings.
 
 ## usage
 
