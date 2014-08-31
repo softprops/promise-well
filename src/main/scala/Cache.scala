@@ -109,7 +109,7 @@ case class Lru[K, V](
   evictions: Option[(K, Future[V]) => Unit] = None
 ) extends Cache[K, V] {
 
-  private[this] case class Entry[V](promise: Promise[V]) {
+  private[this] case class Entry(promise: Promise[V]) {
     val created = System.currentTimeMillis
     @volatile var touched = created
     def future = promise.future
@@ -121,10 +121,10 @@ case class Lru[K, V](
   }
 
   private[this] val underlying = {
-    val b = Cache.newBuilder[K, Entry[V]](initCapacity, maxCapacity)
+    val b = Cache.newBuilder[K, Entry](initCapacity, maxCapacity)
     evictions.foreach { ev =>
-      b.listener(new EvictionListener[K, Entry[V]] {
-        def onEviction(k: K, v: Entry[V]) = ev(k, v.future)
+      b.listener(new EvictionListener[K, Entry] {
+        def onEviction(k: K, v: Entry) = ev(k, v.future)
       })
     }
     b.build
