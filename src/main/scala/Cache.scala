@@ -1,10 +1,12 @@
 package promisewell
 
-import com.googlecode.concurrentlinkedhashmap.ConcurrentLinkedHashMap
+import com.googlecode.concurrentlinkedhashmap.{
+  ConcurrentLinkedHashMap, EvictionListener
+}
 import scala.concurrent.{ Future, ExecutionContext, Promise }
 import scala.concurrent.duration.FiniteDuration
 
-trait Cache[K, V] {
+trait Cache[K,V] {
   /** attempt to resolve element `k` from the cache */
   def get(k: K): Option[Future[V]]
 
@@ -18,35 +20,63 @@ trait Cache[K, V] {
 
   /** clear the contents of the cache */
   def clear(): Unit
+
+  /** Register a function to be invoked when a cached item
+   *  is evicted from the cache returning a _new_ cache. This cache
+   *  will _not_ share items cached with previous cache. */
+  def onEviction(ev: (K, Future[V]) => Unit): Cache[K, V]
 }
 
 object Cache {
-  def capped[K,V](
-    initCap: Int,
-    maxCap: Long): Cache[K, V] =
-    Capped(initCap, maxCap)
+  object Default {
+    val InitCap = 16
+    val MaxCap = Long.MaxValue - Int.MaxValue
+  }
 
+  /** returns a cache whose items will be limited in number to that
+   *  of the specified maxCap. */
+  def capped[K,V](
+    initCap: Int = Default.InitCap,
+    maxCap: Long = Default.MaxCap): Cache[K, V] =
+      Capped(initCap, maxCap)
+
+  /** returns a cache whose items will expire after the specified ttl and
+   *  that haven't been accessed after the specified ttidle. This cache
+   *  will also be limited in number based on the specified maxCap */
   def lru[K,V](
-    initCap: Int,
-    maxCap: Long,
+    initCap: Int = Default.InitCap,
+    maxCap: Long = Default.MaxCap,
     ttl: FiniteDuration,
     ttidle: FiniteDuration): Cache[K, V] =
       Lru(initCap, maxCap, ttl, ttidle)
 
   private [promisewell] def newBuilder[A,B]
-   (initCap: Int, maxCap: Long) =
+   (initCap: Int, maxCap: Long) = {
     new ConcurrentLinkedHashMap.Builder[A, B]
       .initialCapacity(initCap)
       .maximumWeightedCapacity(maxCap)
+   }
 }
 
-case class Capped[K, V](
+case class Capped[K,V](
   initCapacity: Int,
-  maxCapacity: Long
+  maxCapacity: Long,
+  evictions: Option[(K,Future[V]) => Unit] = None
 ) extends Cache[K, V] {
 
-  private[this] val underlying =
-    Cache.newBuilder[K, Future[V]](initCapacity, maxCapacity).build
+  private[this] val underlying = {
+    val b = Cache.newBuilder[K, Future[V]](initCapacity, maxCapacity)
+    evictions.foreach { ev =>
+      b.listener(new EvictionListener[K, Future[V]] {
+        def onEviction(k: K, v: Future[V]) =
+          ev(k, v)
+      })
+    }
+    b.build
+  }
+
+  def onEviction(ev: (K, Future[V]) => Unit) =
+    copy(evictions = Some(ev))
 
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
@@ -75,8 +105,9 @@ case class Lru[K, V](
   initCapacity: Int,
   maxCapacity: Long,
   ttlive: FiniteDuration,
-  ttidle: FiniteDuration
-) extends Cache[K, V]{
+  ttidle: FiniteDuration,
+  evictions: Option[(K, Future[V]) => Unit] = None
+) extends Cache[K, V] {
 
   private[this] case class Entry[V](promise: Promise[V]) {
     val created = System.currentTimeMillis
@@ -89,8 +120,18 @@ case class Lru[K, V](
     }
   }
 
-  private[this] val underlying =
-    Cache.newBuilder[K, Entry[V]](initCapacity, maxCapacity).build
+  private[this] val underlying = {
+    val b = Cache.newBuilder[K, Entry[V]](initCapacity, maxCapacity)
+    evictions.foreach { ev =>
+      b.listener(new EvictionListener[K, Entry[V]] {
+        def onEviction(k: K, v: Entry[V]) = ev(k, v.future)
+      })
+    }
+    b.build
+  }
+
+  def onEviction(ev: (K, Future[V]) => Unit) =
+    copy(evictions = Some(ev))
 
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {
