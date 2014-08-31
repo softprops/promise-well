@@ -110,8 +110,8 @@ case class Lru[K, V](
 ) extends Cache[K, V] {
 
   private[this] case class Entry(promise: Promise[V]) {
-    val created = System.currentTimeMillis
-    @volatile var touched = created
+    private[this] val created = System.currentTimeMillis
+    @volatile private[this] var touched = created
     def future = promise.future
     def touch() = touched = System.currentTimeMillis
     def live = {
