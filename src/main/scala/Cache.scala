@@ -22,28 +22,31 @@ trait Cache[K, V] {
 
 object Cache {
   def capped[K,V](
-    cap: Long,
-    initCap: Int): Cache[K, V] =
-    Capped(cap, initCap)
+    initCap: Int,
+    maxCap: Long): Cache[K, V] =
+    Capped(initCap, maxCap)
 
   def lru[K,V](
-    cap: Long,
     initCap: Int,
+    maxCap: Long,
     ttl: FiniteDuration,
     ttidle: FiniteDuration): Cache[K, V] =
-      Lru(cap, initCap, ttl, ttidle)
+      Lru(initCap, maxCap, ttl, ttidle)
+
+  private [promisewell] def newBuilder[A,B]
+   (initCap: Int, maxCap: Long) =
+    new ConcurrentLinkedHashMap.Builder[A, B]
+      .initialCapacity(initCap)
+      .maximumWeightedCapacity(maxCap)
 }
 
 case class Capped[K, V](
-  capacity: Long,
-  initCapacity: Int
+  initCapacity: Int,
+  maxCapacity: Long
 ) extends Cache[K, V] {
 
   private[this] val underlying =
-    new ConcurrentLinkedHashMap.Builder[K, Future[V]]
-      .initialCapacity(initCapacity)
-      .maximumWeightedCapacity(capacity)
-      .build
+    Cache.newBuilder[K, Future[V]](initCapacity, maxCapacity).build
 
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
@@ -69,8 +72,8 @@ case class Capped[K, V](
 }
 
 case class Lru[K, V](
-  capacity: Long,
   initCapacity: Int,
+  maxCapacity: Long,
   ttlive: FiniteDuration,
   ttidle: FiniteDuration
 ) extends Cache[K, V]{
@@ -87,10 +90,7 @@ case class Lru[K, V](
   }
 
   private[this] val underlying =
-    new ConcurrentLinkedHashMap.Builder[K, Entry[V]]
-      .initialCapacity(initCapacity)
-      .maximumWeightedCapacity(capacity)
-      .build
+    Cache.newBuilder[K, Entry[V]](initCapacity, maxCapacity).build
 
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {

@@ -16,7 +16,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration._
 import promisewell.Cache
 
-val well = Cache.lru[Coods, City](20, 10, 1 hour, 10 minutes)
+val well = Cache.lru[Coods, City](initCapacity, maxCapacity, 1 hour, 10 minutes)
 
 // lookup a city directly in the cache
 val cityOpt: Option[Future[City]] = well.get(latlon)
