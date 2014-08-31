@@ -36,19 +36,19 @@ object Cache {
   /** returns a cache whose items will be limited in number to that
    *  of the specified maxCap. */
   def capped[K,V](
-    initCap: Int = Default.InitCap,
-    maxCap: Long = Default.MaxCap): Cache[K, V] =
-      Capped(initCap, maxCap)
+    initCapacity: Int = Default.InitCap,
+    maxCapacity: Long = Default.MaxCap): Cache[K, V] =
+      Capped(initCapacity, maxCapacity)
 
   /** returns a cache whose items will expire after the specified ttl and
    *  that haven't been accessed after the specified ttidle. This cache
    *  will also be limited in number based on the specified maxCap */
   def lru[K,V](
-    initCap: Int = Default.InitCap,
-    maxCap: Long = Default.MaxCap,
+    initCapacity: Int = Default.InitCap,
+    maxCapacity: Long = Default.MaxCap,
     ttl: FiniteDuration,
     ttidle: FiniteDuration): Cache[K, V] =
-      Lru(initCap, maxCap, ttl, ttidle)
+      Lru(initCapacity, maxCapacity, ttl, ttidle)
 
   private [promisewell] def newBuilder[A,B]
    (initCap: Int, maxCap: Long) = {
@@ -78,6 +78,11 @@ case class Capped[K,V](
   def onEviction(ev: (K, Future[V]) => Unit) =
     copy(evictions = Some(ev))
 
+  private def evict(k: K, v: Future[V]) =
+    evictions.foreach { ev =>
+      ev(k, v)
+    }
+
   def get(k: K): Option[Future[V]] = Option(underlying.get(k))
 
   def apply
@@ -89,14 +94,23 @@ case class Capped[K,V](
         val future = make()
         future.onComplete { value =>
           promise.complete(value)
-          if (value.isFailure) underlying.remove(k)
+          if (value.isFailure) {
+            underlying.remove(k)
+            evict(k, future)
+          }
         }
         future
       case made => made
     }
   }
 
-  def remove(k: K): Option[Future[V]] = Option(underlying.remove(k))
+  def remove(k: K): Option[Future[V]] = {
+    val rm = Option(underlying.remove(k))
+    rm.foreach { f =>
+      evict(k, f)
+    }
+    rm
+  }
 
   def clear(): Unit = underlying.clear()
 }
@@ -124,7 +138,9 @@ case class Lru[K, V](
     val b = Cache.newBuilder[K, Entry](initCapacity, maxCapacity)
     evictions.foreach { ev =>
       b.listener(new EvictionListener[K, Entry] {
-        def onEviction(k: K, v: Entry) = ev(k, v.future)
+        def onEviction(k: K, v: Entry) = {
+          ev(k, v.future)
+        }
       })
     }
     b.build
@@ -133,22 +149,34 @@ case class Lru[K, V](
   def onEviction(ev: (K, Future[V]) => Unit) =
     copy(evictions = Some(ev))
 
+  private def evict(k: K, v: Future[V]) =
+    evictions.foreach { ev =>
+      ev(k, v)
+    }
+
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {
-      case null => None
+      case null =>
+        println("nada")
+        None
       case entry if entry.live =>
+        println("touch live")
         entry.touch()
         Some(entry.future)
       case entry =>
+        println("expired")
         // expire
-        if (underlying.remove(k, entry)) None
-        else get(k)
+        if (underlying.remove(k, entry)) {
+          evict(k, entry.future)
+          None
+        } else get(k)
     }
 
   def apply
    (k: K, make: () => Future[V])
    (implicit ec: ExecutionContext): Future[V] = {
     def put() = {
+      println("putting new entry")
       val newEntry = Entry(Promise[V]())
       val future =
         underlying.put(k, newEntry) match {
@@ -159,7 +187,10 @@ case class Lru[K, V](
         }
       future.onComplete { value =>
         newEntry.promise.tryComplete(value)
-        if (value.isFailure) underlying.remove(k, newEntry)
+        if (value.isFailure) {
+          underlying.remove(k, newEntry)
+          evict(k, newEntry.future)
+        }
       }
       newEntry.future
     }
@@ -168,15 +199,21 @@ case class Lru[K, V](
       case entry if entry.live =>
         entry.touch()
         entry.future
-      case entry => put()
+      case entry =>
+        println("expired. reput")
+        put()
     }
   }
 
   def remove(k: K): Option[Future[V]] =
     underlying.remove(k) match {
       case null => None
-      case entry if (entry.live) => Some(entry.future)
-      case _ => None
+      case entry if entry.live =>
+        evict(k, entry.future)
+        Some(entry.future)
+      case entry =>
+        evict(k, entry.future)
+        None
     }
 
   def clear(): Unit = underlying.clear()
