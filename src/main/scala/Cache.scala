@@ -44,10 +44,10 @@ object Cache {
    *  that haven't been accessed after the specified ttidle. This cache
    *  will also be limited in number based on the specified maxCap */
   def lru[K,V](
-    initCapacity: Int = Default.InitCap,
-    maxCapacity: Long = Default.MaxCap,
     ttl: FiniteDuration,
-    ttidle: FiniteDuration): Cache[K, V] =
+    ttidle: FiniteDuration,
+    initCapacity: Int = Default.InitCap,
+    maxCapacity: Long = Default.MaxCap): Cache[K, V] =
       Lru(initCapacity, maxCapacity, ttl, ttidle)
 
   private [promisewell] def newBuilder[A,B]
@@ -128,9 +128,12 @@ case class Lru[K, V](
     @volatile private[this] var touched = created
     def future = promise.future
     def touch() = touched = System.currentTimeMillis
-    def live = {
+    def fresh = {
       val now = System.currentTimeMillis
-      (created +  ttlive.toMillis) > now && (touched + ttidle.toMillis) > now
+      val s = (created + ttlive.toMillis) > now && (touched + ttidle.toMillis) > now
+      println("created " + ((created + ttlive.toMillis) > now))
+      println("touched " + ((touched + ttidle.toMillis) > now))
+      s
     }
   }
 
@@ -157,14 +160,12 @@ case class Lru[K, V](
   def get(k: K): Option[Future[V]] =
     underlying.get(k) match {
       case null =>
-        println("nada")
         None
-      case entry if entry.live =>
-        println("touch live")
+      case entry if entry.fresh =>
         entry.touch()
         Some(entry.future)
       case entry =>
-        println("expired")
+        println(k + " entry is stale")
         // expire
         if (underlying.remove(k, entry)) {
           evict(k, entry.future)
@@ -176,13 +177,12 @@ case class Lru[K, V](
    (k: K, make: () => Future[V])
    (implicit ec: ExecutionContext): Future[V] = {
     def put() = {
-      println("putting new entry")
       val newEntry = Entry(Promise[V]())
       val future =
         underlying.put(k, newEntry) match {
           case null => make()
           case entry =>
-            if (entry.live) entry.future
+            if (entry.fresh) entry.future
             else make()
         }
       future.onComplete { value =>
@@ -196,11 +196,10 @@ case class Lru[K, V](
     }
     underlying.get(k) match {
       case null => put()        
-      case entry if entry.live =>
+      case entry if entry.fresh =>
         entry.touch()
         entry.future
       case entry =>
-        println("expired. reput")
         put()
     }
   }
@@ -208,7 +207,7 @@ case class Lru[K, V](
   def remove(k: K): Option[Future[V]] =
     underlying.remove(k) match {
       case null => None
-      case entry if entry.live =>
+      case entry if entry.fresh =>
         evict(k, entry.future)
         Some(entry.future)
       case entry =>
